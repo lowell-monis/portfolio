@@ -1,0 +1,19 @@
+{
+    "education":[
+        {
+            "title": "Aug 2023 - Present",
+            "cardTitle": "B. S., Data Science",
+            "cardSubtitle":"Michigan State University College of Natural Science",
+            "cardDetailedText": "GPA: 4.0/4.0",
+            "icon" : {
+                "src": ""
+            }
+        },
+        {
+            "title": "Aug 2023 - Present",
+            "cardTitle": "B. A., World Politics",
+            "cardSubtitle":"Michigan State University College of Social Science",
+            "cardDetailedText": "GPA: 4.0/4.0"
+        }
+    ]
+}

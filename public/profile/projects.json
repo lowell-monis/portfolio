@@ -1,0 +1,53 @@
+{
+    "projects" : [
+        {
+            "image" : "images/projects/ferticulture.png",
+            "title": "fertiCulture",
+            "bodyText": "- Application developed using Kivy and Python.\n -  Utlizes machine learning and historical data to predict optimal crop for soil and environmental quality, or optimal conditions for a given crop.\n - Aimed at assisting homegrowers.",
+            "links": [
+                {
+                    "text": "GitHub",
+                    "href": "https://github.com/lowell-monis/ferticulture"
+                }
+            ],
+            "tags" : [
+                "Python",
+                "Kivy",
+                "scikit-learn"
+            ]
+        },
+        {
+            "title": "A+ Student Management Systems",
+            "bodyText": "- A simple desktop app designed to practice interface creation and database connections / backend.",
+            "links": [
+                {
+                    "text": "GitHub",
+                    "href": "https://github.com/lowell-monis/aplus"
+                }
+            ],
+            "tags" : [
+                "Python",
+                "Tkinter"
+            ]
+        },
+        {
+            "title": "The Dynamics Behind Exchange Rates",
+            "bodyText": "- Time series analysis and machine learning project that uses SARIMA models to predict the EUR-USD exchange rate with an error of 0.7%.",
+            "links": [
+                {
+                    "text": "GitHub",
+                    "href": "https://github.com/lowell-monis/dynamics-behind-exchange-rates"
+                }
+            ],
+            "tags" : [
+                "Python",
+                "SARIMA",
+                "Jupyter",
+                "Markdown",
+                "pandas",
+                "plotly",
+                "NumPy"
+            ]
+        }
+    ]
+}

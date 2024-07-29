@@ -1,0 +1,43 @@
+{
+    "experiences": [
+        {
+            "title": "Undergraduate Learning Assistant",
+            "subtitle": "Department of Statistics and Probability, Michigan State University",
+            "workDescription": [
+                "Assigned to the introductory class for the Statistics and Data Science majors, STT 180 (Introduction to Data Science after being selected from a large pool of applicants.",
+                "Involved assisting the instructional team with the administration course, grading of objective course assesment materials, leading help rooms, and providing in-class assistance to students with R coding problems."
+            ],
+            "dateText": "08/2024 – Present"
+        },
+        {
+            "title": "Undergraduate Researcher",
+            "subtitle": "Bhattacharya Lab, Institute for Quantitative Health Sciences, Michigan State University",
+            "workDescription": [
+                "Completed a one-on-one research experience under Dr. Sudin Bhattacharya, Associate Professor at the College of Engineering (BME) and the Department of Pharmacology and Toxicology.",
+                "Studied extensive literature in ordinary differential equations, anatomy, liver zonation and diseases, and computational biology.",
+                "Worked with computational modeling tools like CompuCell3D and Tellurium on Python to build on existing digital models of the human liver, and eventually construct agent-based models to simulate biological processes."
+            ],
+            "dateText": "05/2024 – Present"
+        },
+        {
+            "title": "Researcher, Discover America Exchange Program",
+            "subtitle": "Department of Mathematics, Michigan State University",
+            "workDescription": [
+                "Studied and analyzed a paper under Dr. Yijun Zuo, Professor of Statistics and Probability, titled 'Robust penalized least squares of depth trimmed regression for high-dimensional data', while understanding specific topics covered by the paper.",
+                "Presented my studies at the 21st Annual Mathematics Conference.",
+                "Contributed to the social aspect of the program by leading and supporting a cohort of exchange students as a chaperone during their spring break trip."
+            ],
+            "dateText": "01/2024 – 04/2024"
+        },
+        {
+            "title": "Professorial Assistant",
+            "subtitle": "Michigan State University Honors College",
+            "workDescription": [
+                "Appointed as a Professorial Assistant to Dr. Matt Grossmann, Director of the Institute of Public Policy and Social Research (IPPSR) and Professor of Political Science.",
+                "Analyzed demographics by comparing relevant trends and their relation to policy-making using R while developing recommendations to advance inclusion in legislatures.",
+                "Presented at MSU’s 9th Annual Diversity Research Showcase alongside nearly 50 other students and received the Award for Research at the Preliminary Stage."
+            ],
+            "dateText": "09/2023 – Present"
+        }
+    ]
+}

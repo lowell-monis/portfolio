@@ -1,0 +1,123 @@
+{
+    "intro": "I love to learn new things and experiment with new technologies.\nThese are some of the major languages, technologies, tools and platforms I have worked with:",
+    "skills": [{
+     
+            "title": "Languages",
+            "items" : [
+                {
+                    "icon": "images/skills/python.png",
+                    "title": "Python"
+                },
+                {
+                    "icon": "images/skills/R.png",
+                    "title": "R"
+                },
+                {
+                    "icon": "images/skills/js.png",
+                    "title": "JavaScript"
+                },
+                {
+                    "icon": "images/skills/mysql.png",
+                    "title": "MySQL"
+                },
+                {
+                    "icon": "images/skills/tex.png",
+                    "title": "TeX"
+                }
+        ]},
+        {
+            "title": "R Packages",
+            "items" : [
+                {
+                    "icon": "images/skills/dplyr.png",
+                    "title": "dplyr"
+                },
+                {
+                    "icon": "images/skills/tidyr.png",
+                    "title": "tidyr"
+                },
+                {
+                    "icon": "images/skills/ggplot2.png",
+                    "title": "ggplot2"
+                },
+                {
+                    "icon": "images/skills/sf.png",
+                    "title": "sf"
+                },
+                {
+                    "icon": "images/skills/broom.png",
+                    "title": "broom"
+                },
+                {
+                    "icon": "images/skills/blank.jpg",
+                    "title": "stats"
+                },
+                {
+                    "icon": "images/skills/blank.jpg",
+                    "title": "rnaturalearth"
+                }
+            ]
+        },
+        {
+            "title": "Python Libraries & Frameworks",
+            "items" : [
+                {
+                    "icon": "images/skills/numpy.svg",
+                    "title": "NumPy"
+                },
+                {
+                    "icon": "images/skills/pandas.svg",
+                    "title": "pandas"
+                },
+                {
+                    "icon": "images/skills/matplotlib.png",
+                    "title": "matplotlib"
+                },
+                {
+                    "icon": "images/skills/plotly.png",
+                    "title": "plotly"
+                },
+                {
+                    "icon": "images/skills/cc3d.png",
+                    "title": "CompuCell3D"
+                },
+                {
+                    "icon": "images/skills/scipy.svg",
+                    "title": "SciPy"
+                },
+                {
+                    "icon": "images/skills/scikit.png",
+                    "title": "scikit-learn"
+                },
+                {
+                    "icon": "images/skills/statsmodels.svg",
+                    "title": "statsmodels"
+                },
+                {
+                    "icon": "images/skills/kivy.png",
+                    "title": "Kivy"
+                },
+                {
+                    "icon": "images/skills/tkinter.png",
+                    "title": "Tkinter"
+                }
+            ]
+        },
+        {
+            "title" : "Tools & Platforms",
+            "items": [
+                {
+                    "icon": "images/skills/git.png",
+                    "title": "Git"
+                },
+                {
+                    "icon": "images/skills/ms.png",
+                    "title": "Microsoft Office Suite"
+                },
+                {
+                    "icon": "images/skills/canva.png",
+                    "title": "Canva"
+                }
+            ]
+    }
+]}

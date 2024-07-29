@@ -1,0 +1,20 @@
+{
+    "social": [
+        {
+            "network" : "linkedin",
+            "href": "https://linkedin.com/in/lowell-monis"
+        },
+        {
+            "network" : "github",
+            "href": "https://github.com/lowell-monis"
+        },
+        {
+            "network" : "email",
+            "href": "mailto:monislow@msu.edu"
+        },
+        {
+            "network" : "instagram",
+            "href": "https://instagram.com/lowell.monis"
+        }
+    ]
+}
