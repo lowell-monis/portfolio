@@ -1,0 +1,652 @@
+---
+title: Modeling the odds of malignancy for a breast mass using Bayesian logistic regression
+classoption: ba, twocolumn
+author:
+  - firstname: Lowell 
+    lastname: Monis
+    email: monislow@msu.edu
+    url: www.github.com/lowell-monis
+    affiliationref: msu
+    footnoterefs: 
+      - ug
+affiliations:
+  - ref: msu
+    name: Michigan State University
+    address: Department of Statistics and Probability, 619 Red Cedar Road, East Lansing, Michigan, 48824
+footnotes:
+  - ref: ug
+    text: "Undergraduate"
+abstract: |
+  This report presents a Bayesian approach to classifying breast cancer diagnoses (malignant vs. benign) using 30 features computed from a digitized image of a fine needle aspirate of breast masses. Bayesian logistic regression is employed with Metropolis-Hastings sampling for inference. Bayesian variable selection is implemented to identify the most important diagnostic features.
+
+date: "`r Sys.Date()`"
+header-includes:
+  - \usepackage{lineno}
+  - \usepackage{amssymb}
+  - \linenumbers
+  - \setcounter{secnumdepth}{-1}
+bibliography: references.bib
+output: 
+  bookdown::pdf_book: 
+    base_format: rticles::isba_article
+    number_sections: false
+    md_extensions: -autolink_bare_uris #keep these off or \printead{} will fail on email addresses
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+options(width = 40)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE, fig.height=2, fig.width=2, fig.align='left')
+```
+
+```{r}
+library(mvtnorm)
+library(tidyverse)
+library(bestglm)
+theme_set(theme_minimal(base_size = 7))
+data <- read.csv("data/wdbc.data", header=FALSE)
+colnames(data) <- c("id", "diagnosis", 
+                    "radius1", "texture1", "perimeter1", "area1", 
+                    "smoothness1", "compactness1", "concavity1",
+                    "concave_points1", "symmetry1", "fractal_dimension1",
+                    "radius2", "texture2", "perimeter2", "area2",
+                    "smoothness2", "compactness2", "concavity2",
+                    "concave_points2", "symmetry2", "fractal_dimension2",
+                    "radius3", "texture3", "perimeter3", "area3",
+                    "smoothness3", "compactness3", "concavity3",
+                    "concave_points3", "symmetry3", "fractal_dimension3")
+```
+
+## Introduction
+
+Breast cancer remains one of the most prevalent and life-threatening diseases worldwide. Early and accurate diagnosis is crucial for effective treatment and improved patient outcomes. Fine needle aspiration (FNA) is a minimally invasive diagnostic procedure that extracts cells from a breast mass for analysis. The advent of digital imaging technology has enabled the extraction of quantitative features from these cell nuclei, opening new avenues for automated diagnosis using statistical and machine learning methods.
+
+The Wisconsin Diagnostic Breast Cancer (WDBC) dataset, curated by \citet{breast_cancer_wisconsin_(diagnostic)_17} at the University of Wisconsin, represents a landmark contribution to this field. The dataset contains measurements computed from digitized images of fine needle aspirates, capturing various characteristics of cell nuclei that distinguish malignant from benign breast masses. Previous research has demonstrated that these features contain sufficient information to achieve highly accurate classification, with some studies reporting predictive accuracy exceeding 97% using linear programming-based methods.
+
+While classical machine learning approaches have proven effective, they often provide point estimates without quantifying the uncertainty in predictions or model parameters. Bayesian methods offer a principled framework for incorporating prior knowledge, quantifying uncertainty, and performing model selection in a probabilistic manner. In this analysis, a Bayesian logistic regression approach is adopted to model the probability of malignancy as a function of the extracted features. This approach not only provides predictions but also yields posterior information for all model parameters, enabling greater understanding of the effect of each individual quantifier and the role it plays in the malignancy of a breast mass when prior information is provided to the model.
+
+### Objectives
+
+This study addresses the following question:
+
+> Can an accurate Bayesian logistic regression model be developed to predict a breast cancer diagnosis from digitized cell nuclei features, and which of the thirty morphological characteristics are most predictive of malignancy and should be prioritized in clinical diagnosis?
+
+Specifically, this study will:
+
+- Build a Bayesian logistic regression model using all 30 available features and assess its predictive accuracy
+- Quantify the importance of each feature through posterior probabilities
+- Compare the Bayesian variable selection results with classical model selection approaches (AIC/BIC)
+
+### The Data
+
+The Wisconsin Diagnostic Breast Cancer dataset was collected at the University of Wisconsin Clinical Sciences Center starting around 1989. It contains measurements from 569 patients who underwent fine needle aspiration of breast masses. For each patient, a digitized image of the aspirate was analyzed to compute quantitative features describing the characteristics of cell nuclei present in the image. The first feature, `id`, identifies each sample in the dataset. This feature can be discarded since it cannot be used as a predictor variable in the analysis.
+
+```{r echo=FALSE}
+str(data, strict.width='cut')
+```
+
+The dataset contains one binary response variable where B = benign, and M = malignant.
+
+```{r echo=FALSE}
+class_dist <- data %>% group_by(diagnosis) %>% summarise(count=n()) %>% mutate(percentage=(count/sum(count))*100)
+class_dist
+ggplot(class_dist, aes(x=diagnosis, y=count))+geom_col()+labs(title='Distribution of Diagnosis\nin WDBC Data', x='Diagnosis', y='Count')
+```
+
+Apart from the response variable, there are also 30 continuous predictor variables. The 30 real-valued predictor variables are organized into three groups of ten measurements each.
+
+- If the variable ends with 1, these are the mean values averaging each measured value across all cell nuclei in the image.
+- If the variable ends with 2, this indicates the standard error of each measured value across all cell nuclei.
+- If the variable ends with 3, the feature stores the mean of the three largest (or the worst possible measurements) of each measured value.
+
+The ten base measurements computed for each cell nucleus are:
+
+- *Radius*: Mean distance from center to points on the perimeter.
+- *Texture*: Standard deviation of gray-scale values.
+- *Perimeter*: Perimeter of the nucleus.
+- *Area*: Area of the nucleus.
+- *Smoothness*: Local variation in radius lengths
+- *Compactness*: Computed as perimeter$^2$ / area - 1.0
+- *Concavity:* Severity of concave portions of the contour
+- *Concave points*: Number of concave portions of the contour
+- *Symmetry*: Symmetry of the nucleus
+- *Fractal dimension*: "Coastline approximation" - 1
+
+```{r echo=FALSE}
+summary(data[, -c(1, 2)])
+```
+
+All feature values were recorded with four significant digits, and the dataset contains no missing values according to its description. Previous research has shown that these 30 features contain sufficient information to achieve linear separability of the two diagnostic classes, with particularly strong predictive power coming from features such as worst area, worst smoothness, and mean texture.
+
+## Preprocessing
+
+The first, and most important preprocessing step while preparing the data for analysis is to encode the response variable into something more acceptable to a numerical model. Since this model aims to predict malignancy in a breast mass, a response that the mass is malignant is set to 1, while a response that the mass is benign is set to 0.
+
+$$y=\begin{cases}0,&\text{mass is benign}\\1,&\text{mass is malignant}\end{cases}$$
+
+```{r}
+y <- ifelse(data$diagnosis=='M',1,0)
+table(y, data$diagnosis)
+```
+
+The design matrix needs to be constructed as follows:
+
+$$\mathbf{X}=\begin{bmatrix}1&x_{1,1}&x_{1,2}&\cdots&x_{1,30}\\1&x_{2,1}&x_{2,2}&\cdots&x_{2,30}\\\vdots&\vdots&\vdots&\ddots&\vdots\\1&x_{n,1}&x_{n,2}&\cdots&x_{n,30}\end{bmatrix}_{n\times p}$$
+
+where $n=569$ patients, $p=31$ parameters (1 intercept + 30 features), and $x_{i,j}$ represents the value of feature $j$ for patient $i$.
+
+To do this, the features are bound with an all-ones vector column-wise:
+
+$$\mathbf{X}=[\mathbf{1}_n\mid\mathbf{X}_\mathrm{features}]\in\mathbb{R}^{n\times p}$$
+
+```{r}
+X_raw <- cbind(1, as.matrix(data[, -c(1,2)]))
+```
+
+```{r}
+X <- X_raw
+X[, -1] <- scale(X_raw[, -1])
+feature_means <- attr(scale(X_raw[, -1]), "scaled:center")
+feature_sds <- attr(scale(X_raw[, -1]), "scaled:scale")
+n <- nrow(X)
+p <- ncol(X)
+```
+
+Following through the observations made earlier about the difference in the scales of each feature, the design matrix can be standardized to $\mathcal{N}(0, 1)$ to improve the performance of algorithms like Metropolis-Hastings, and make the interpretation of coefficients more meaningful.
+
+$$
+\mathbf{X}_{\text{scaled}} = \frac{\mathbf{X} - \mu}{\sigma}
+$$
+
+## Model Setup
+
+Since the response variable for this analysis is binary (malignant or benign), a logistic regression model is the appropriate choice for classification. The goal is to estimate the probability that a breast mass is malignant given the observed feature measurements. A Bayesian approach will be employed to quantify uncertainty in both predictions and parameter estimates.
+
+For each observation $i=1,\dots,n$, where $n=569$ patients, the response variable $Y_i$ follows a Bernoulli distribution:
+
+$$Y_i\mid \mathbf{x}_i,\beta\sim\mathrm{Bernoulli}(\theta_i)$$
+Here $Y_i\in\{0,1\}$ indicates whether patient $i$ has a malignant or benign mass. $\mathbf{x}_i$ is the vector of 30 feature measurements for patient $i$ (and an intercept value), and $\boldsymbol{\beta}=(\beta_0,\beta_1,\dots,\beta_{30})^T$ is the vector of regression coefficients to be estimated, containing the intercept and 30 coefficients corresponding to each feature, which quantify the effect of each measurement on the odds of malignancy. The probability of malignancy for patient $i$ is modeled:
+
+$$\theta_i=P(Y_i=1\mid \mathbf{x}_i,\boldsymbol{\beta})=\frac{e^{\boldsymbol{\beta}^T\mathbf{x}_i}}{1+e^{\boldsymbol{\beta}^T\mathbf{x}_i}}$$
+This function, known as the logistic or sigmoid function, ensures that predicted probabilities lie between 0 and 1, making it suitable for binary classification problems.
+
+Equivalently, this can also be expressed using its logit transformation as follows:
+
+\begin{align*}
+\text{logit}(\theta_i) &= \log\left(\frac{\theta_i}{1-\theta_i}\right)\\&= \boldsymbol{\beta}^T \mathbf{x}_i\\&= \beta_0 + \sum_{j=1}^{30} \beta_j x_{i,j}
+\end{align*}
+
+The left-hand side represents the log-odds of malignancy, which is modeled as a linear combination of the features.
+
+The likelihood function quantifies the probability of observing the response $\mathbf{y}=(y_1,y_2,\dots,y_n)^T$ given the feature matrix $\mathbf{X}$ and coefficient vector $\boldsymbol\beta$. Under the assumption that observations are independent, the joint likelihood is the product of individual Bernoulli probabilities:
+
+\begin{align*}
+p(\mathbf{y} \mid \mathbf{X}, \boldsymbol{\beta}) &= \prod_{i=1}^{n} \theta_i^{y_i}(1-\theta_i)^{1-y_i}\\ &= \prod_{i=1}^{n} \frac{e^{y_i \boldsymbol{\beta}^T \mathbf{x}_i}}{1 + e^{\boldsymbol{\beta}^T\mathbf{x}_i}}
+\end{align*}
+
+The expression follows from the Bernoulli probability mass function---when $y_i=1$ (malignant), the contribution is $\theta_i$, and when $y_i=0$ (benign), the contribution is $1-\theta_i$. The expansion of the expression is provided by substituting the logistic function $\theta_i$.
+
+For numerical stability and computational efficiency, it is standard practice to work with the log-likelihood. Taking the natural logarithm of both sides and applying the properties of logarithms, one can obtain:
+
+\begin{align*}
+\log p(\mathbf{y} \mid \mathbf{X}, \boldsymbol{\beta}) &= \sum_{i=1}^{n} \log\left[\frac{e^{y_i \boldsymbol{\beta}^T \mathbf{x}_i}}{1 + e^{\boldsymbol{\beta}^T\mathbf{x}_i}}\right]\\
+&=\sum_{i=1}^{n} \left[\log\left(e^{y_i \boldsymbol{\beta}^T \mathbf{x}_i}\right) - \log\left(1 + e^{\boldsymbol{\beta}^T\mathbf{x}_i}\right)\right]\\
+&=\sum_{i=1}^{n} \left[y_i \boldsymbol{\beta}^T \mathbf{x}_i - \log\left(1 + e^{\boldsymbol{\beta}^T\mathbf{x}_i}\right)\right]
+\end{align*}
+
+The log-likelihood form is computationally advantageous due to its ability to convert products into sums, which are numerically more stable, and avoid potential underflow issues when multiplying many small probabilities. It is also the foundation for constructing the acceptance ratio in the Metropolis-Hastings algorithm, which will be explored later in this study.
+
+### Prior Distribution
+
+In Bayesian inference, prior distributions encode beliefs about parameters before observing the data. For this analysis, a weakly informative multivariate normal prior is adopted for the coefficient vector $\boldsymbol\beta$:
+
+$$\boldsymbol{\beta}\sim\mathcal{N}(\mu_o,\Sigma_0)$$
+where $\mu_0=\mathbf{0}_p$, $p=31$, giving a a 31-dimensional all-zeros vector, and $\Sigma_0=\sigma_0^2\mathbf{I}_p$, where $\sigma_0^2=100$, and $\mathbf{I}_p$ is the $31\times31$ identity matrix. This choice reflects several important considerations. First, centering the prior at zero with prior mean set to 0 indicates no prior preference for the direction or magnitude of effects--it is not assumed *a priori* that any feature increases or decreases the probability of malignancy. Second, the large prior variance, set to 100, makes this a weakly informative prior, meaning the data will largely determine the posterior estimates, rather than being heavily influenced by prior assumptions. The independence structure impose by the diagonal covariance matrix $\Sigma_0$ assumes that, prior to seeing the data, there is no reason to believe the coefficients are correlated with one another.
+
+```{r}
+mu0<-rep(0,p)
+sigma0<-100*diag(p)
+```
+
+Despite being weakly informative, this prior serves an important regularization function by gently discouraging extremely large coefficient values that might lead to overfitting or numerical instability. However, unlike conjugate priors in simpler models such as the normal-normal model for linear regression, this prior does not combine with the logistic likelihood to produce a posterior distribution with a known, closed-form expression. Consequently, the posterior summaries cannot be obtained analytically, and computational methods must be used.
+
+### Posterior Distribition
+
+The posterior distribution combines the likelihood and prior through Bayes' theorem:
+
+$$p(\boldsymbol\beta\mid\mathbf{y},\mathbf{X})=\frac{p(\mathbf{y}\mid\mathbf{X},\boldsymbol{\beta})\cdot p(\boldsymbol\beta)}{p(\mathbf{y}\mid\mathbf{X})}$$
+The denominator $p(\mathbf{y}\mid\mathbf{X})=\int p(\mathbf{y}\mid\mathbf{X},\boldsymbol\beta)p(\boldsymbol\beta)d\boldsymbol\beta$ is the marginal likelihood, which serves as a normalizing constant ensuring the posterior integrates to one. Since this integral is difficult to handle for logistic support, the unnormalized posterior is used, which is proportional to the product of the likelihood and the prior:
+
+\begin{align*}
+p(\boldsymbol{\beta} \mid \mathbf{y}, \mathbf{X}) &\propto p(\mathbf{y} \mid \mathbf{X}, \boldsymbol{\beta}) \cdot p(\boldsymbol{\beta})\\
+&\propto\left[\prod_{i=1}^{n} \frac{e^{y_i \boldsymbol{\beta}^T \mathbf{x}_i}}{1 + e^{\boldsymbol{\beta}^T \mathbf{x}_i}}\right] \cdot e^{-\frac{1}{2\sigma_0^2}\boldsymbol{\beta}^T\boldsymbol{\beta}}
+\end{align*}
+
+The first term is the likelihood contribution as computed above, representing the fit of the model to the observed data, while the second term is the prior contribution, which penalizes coefficients with large magnitudes. The product of these two components balances data fit with regularization.
+
+Once again, computational methods are needed due to the fact that the posterior distribution does not have a closed-form expression. This is because the logistic likelihood is not conjugate to the normal prior. The product of these two densities does not simplify to a recognizable probability distribution. As a result, posterior means, variances, and credible intervals cannot be computed using direct integration or algebraic manipulation.
+
+This necessitates the use of Markov Chain Monte Carlo methods to generate samples from the posterior distribution. By drawing a large number of samples $\boldsymbol\beta^{(1)},\boldsymbol\beta^{(2)},\dots,\boldsymbol\beta^{(S)}$ from $p(\boldsymbol\beta\mid\mathbf{y},\mathbf{X})$ for a total of $S$ simulations, the posterior summaries can be approximated empirically: posterior means can be estimated by sample averages, and credible intervals can be constructed from sample quantiles. The Metropolis-Hastings algorithm, described in the following section, provides the computational framework for generating these samples. The Gibbs sampler is not directly applicable, since the full conditional distributions do not have closed-form expressions either.
+
+## Parameter Tuning
+
+### Algorithm Overview
+
+Since the posterior distribution $p(\boldsymbol{\beta} \mid \mathbf{y}, \mathbf{X})$ lacks a closed-form expression, it cannot be sampled from directly using standard Gibbs sampling methods. Instead, the
+Metropolis algorithm is employed. This is a Markov Chain Monte Carlo (MCMC) technique that generates a sequence of samples $\boldsymbol{\beta}^{(1)}, \boldsymbol{\beta}^{(2)}, \ldots, \boldsymbol{\beta}^{(S)}$ that approximate draws from the posterior distribution. The key idea is to construct a Markov chain whose stationary distribution is the target posterior. After the chain converges, samples can be used to estimate posterior means, credible intervals, and other quantities of interest.
+
+The Metropolis algorithm is a special case of the more general Metropolis-Hastings algorithm where the proposal distribution is symmetric--meaning the probability of proposing a move from state A to state B is the same as proposing a move from B to A. This symmetry simplifies the acceptance ratio calculation, as seen below, making the Metropolis algorithm particularly convenient when symmetric proposals are natural for the problem at hand.
+
+### Proposal Distribution
+
+At each iteration $k$, the algorithm proposes a candidate value $\boldsymbol\beta^*$ from a symmetric proposal distribution centered at the current state $\boldsymbol\beta^{(k)}$:
+$$\boldsymbol{\beta}^* \mid \boldsymbol{\beta}^{(k)} \sim N(\boldsymbol{\beta}^{(k)}, \Sigma_{\text{prop}})$$
+
+This multivariate normal proposal is symmetric because the probability of proposing $\boldsymbol\beta^{(k)}$ given $\boldsymbol\beta^{*}$ is the same as the probability of proposing $\boldsymbol\beta^{*}$ given $\boldsymbol\beta^{(k)}$. This symmetry causes the proposal ratio to cancel in the Metropolis-Hastings acceptance probability, simplifying computations.
+
+The choice of the proposal covariance matrix $\Sigma_\mathrm{prop}$ is critical for the algorithm's efficiency.
+
+$$\Sigma_\mathrm{prop}=\sigma^2_\mathrm{prop}(\mathbf{X}^T\mathbf{X})^{-1}$$
+
+This form incorporates the correlation structure among the features through the $\mathbf{X}^T\mathbf{X})^{-1}$ term. When features are highly correlated, this proposal allows the algorithm to propose coordinated changes to multiple coefficients simultaneously, improving exploration of the posterior distribution. The scalar tuning parameter $\sigma_{\text{prop}}^2$ controls the overall scale of the proposals: larger values lead to bolder moves through the parameter space, while smaller values result in more conservative steps.
+
+The purpose of tuning the proposal variance is to balance two competing goals. If $\sigma^2_\mathrm{prop}$ is too small, the algorithm takes tiny steps and accepts nearly every proposal, but explores the posterior very slowly, leading to a high acceptance rate but poor mixing. Conversely, if it is too large, the algorithm proposes extreme values that are frequently rejecte,d again leading to slow exploration but with lower acceptance rate and poor mixing. Empirical research suggests that an acceptance rate between 20% and 50% typically yields efficient exploration for multivariate problems. $\sigma^2_\mathrm{prop}$ is tuned to achieve rates within or close to this range.
+
+### Acceptance Ratio
+
+At iteration $k$, after proposing $\boldsymbol\beta^*$, it is decided whether to accept or reject it using the Metropolis acceptance ratio:
+
+$$r = \frac{p(\mathbf{y} \mid \mathbf{X}, \boldsymbol{\beta}^*) p(\boldsymbol{\beta}^*)}{p(\mathbf{y} \mid \mathbf{X}, \boldsymbol{\beta}^{(k)}) p(\boldsymbol{\beta}^{(k)})}$$
+This ratio compares the unnormalized posterior density at the proposed value $\boldsymbol\beta^*$ to the density at the current value $\boldsymbol{\beta}^{(k)}$. Notice that the normalizing constant $p(\mathbf{y}\mid\mathbf{X})$ (which is intractable to compute) cancels in this ratio, allowing the evaluation of $r$ using only the likelihood and prior, both of which are computable. If $r\geq1$, the proposed value has higher posterior density and is always accepted. If $r<1$, the proposed value is accepted with probability $r$, ensuring the chan can move to lower-density regions occasionally, which is necessary for convergence to the stationary distribution.
+
+For numerical stability, the acceptance ratio is computed on the logarithmic scale. Probabilities in the likelihood can become extremely small (underflow) or large (overflow), but working with log probabilities avoids these issues. The log acceptance ratio is:
+
+
+\begin{multline*}
+\log r = \sum_{i=1}^{n}\left[y_i(\boldsymbol{\beta}^{*T}\mathbf{x}_i - \boldsymbol{\beta}^{(k)T}\mathbf{x}_i) - \log\frac{1+\exp(\boldsymbol{\beta}^{*T}\mathbf{x}_i)}{1+\exp(\boldsymbol{\beta}^{(k)T}\mathbf{x}_i)}\right] \\- \frac{1}{2\sigma_0^2}(\|\boldsymbol{\beta}^*\|^2 - \|\boldsymbol{\beta}^{(k)}\|^2)
+\end{multline*}
+
+The first term is the log-likelihood ratio, capturing how much better (or worse) the proposed parameters explain the observed data. The second term is the log-prior ratio, reflecting the change in prior plausibility. The decision rule is:
+
+$$\boldsymbol\beta^{(k+1)}=\begin{cases}\boldsymbol\beta^* &\text{if }\log u\leq\log r\\\boldsymbol\beta^{(k)}&\text{else}\end{cases}$$
+where $u\sim\mathrm{Uniform}(0,1)$. This acceptance mechanism ensures detailed balance, guaranteeing that the Markov chain converges to the target posterior distribution.
+
+### Tuning the Proposal Variance
+
+Before running the full MCMC chain on the model, it is essential to select an appropriate value for $\sigma^2_\text{prop}$. This tuning process involves running short pilot chains, with different candidate values, and monitoring the acceptance rate. The goal is to find a value that produces an acceptance rate between 20% and 50%, which has been shown empirically to provide efficient exploration of the posterior in multivariate settings.
+
+Thus, a grid of candidate values is tested by running short MCMC chains for each value and recording the acceptance rate. The optimal choice is the value whose acceptance rate is closes to 35%, which is the midpoint of the desired range, since there can be times where the rates may not be perfectly within the range. This tuning step is computationally inexpensive relative to the full analysis and substantially improves the quality of posterior samples by ensuring the chain mixes well and explores the posterior efficiently.
+
+Once the optimal $\sigma^2_\text{prop}$ is identified, the full MCMC sampler is run for a larger number of iterations using this tuned value. The resulting samples, after discarding an initial burn-in period where the chain adjusts from the prior value, constitute approximate draws from the posterior distribution and form the basis for all subsequent inference.
+
+```{r}
+run_mcmc <- function(sigma2_prop, n_iter = 2000, seed = 465) {
+  set.seed(seed)
+  var_prop <- sigma2_prop * solve(t(X) %*% X)
+  beta <- rep(0, p)
+  accept <- 0
+  
+  BETA <- matrix(0, nrow = n_iter, ncol = p)
+  
+  for(s in 1:n_iter) {
+    beta_prop <- as.vector(rmvnorm(1, beta, var_prop))
+    
+    log_r <- sum(dbinom(y, size = 1, prob = 1/(1 + exp(-X %*% beta_prop)), log = TRUE)) -
+             sum(dbinom(y, size = 1, prob = 1/(1 + exp(-X %*% beta)), log = TRUE)) +
+             dmvnorm(beta_prop, mu0, sigma0, log = TRUE) -
+             dmvnorm(beta, mu0, sigma0, log = TRUE)
+    
+    if(log(runif(1)) <= log_r) {
+      beta <- beta_prop
+      accept <- accept + 1
+    }
+    
+    BETA[s, ] <- beta
+  }
+  
+  acp_rate <- accept / n_iter
+  
+  acf_list <- vector("list", p)
+  for(j in 1:p) {
+    acf_obj <- acf(BETA[, j], lag.max = 3, plot = FALSE)
+    acf_list[[j]] <- acf_obj$acf[2:4, 1, 1]  # Lags 1-3
+  }
+  
+  return(list(
+    acceptance_rate = acp_rate,
+    BETA = BETA,
+    acf_by_param = acf_list,
+    sigma2_prop = sigma2_prop
+  ))
+}
+```
+
+The values being tested as candidates for $\sigma^2_\text{prop}$ are $\{0.5,1,2,5,10,25,50,100\}$. After running chains for 2,000 iterations, the following acceptance rates are computed.
+
+```{r}
+sigma2_grid <- c(0.5, 1, 2, 5, 10, 25, 50, 100)
+results_list <- lapply(sigma2_grid, run_mcmc)
+acceptance_rates <- sapply(results_list, function(x) x$acceptance_rate)
+param_names <- colnames(X)
+acceptance_table <- data.frame(
+  sigma2_prop = sigma2_grid,
+  acceptance_rate = round(acceptance_rates, 3)
+)
+print(acceptance_table)
+```
+
+The value with acceptance rate closest to 35% is `r sigma2_grid[which.min(abs(acceptance_rates - 0.35))]`, which will be chosen as the optimal value.
+
+## Constructing the Full Model using MCMC Diagnostics
+
+Now that the parameter has been tuned to the most optimal value, the number of iterations can be increased to 20,000 with the parameter set to $\sigma^2_\text{prop}=5.0$. The diagnostic traceplots and autocorrelation function plots can be plotted after this to evaluate the coefficients, and determine the amount of burn-in and thinning needed to create the best version of the full model.
+
+```{r}
+results <- run_mcmc(5, n_iter=20000)
+beta_samples <- results$BETA
+beta_samples_long <- as.data.frame(beta_samples) %>%
+  setNames(paste0("Beta ", 0:(ncol(beta_samples) - 1))) %>%
+  mutate(Iteration = 1:nrow(beta_samples)) %>%
+  pivot_longer(
+    cols = starts_with("Beta"),
+    names_to = "Parameter",
+    values_to = "Value"
+  )
+unique_parameters <- unique(beta_samples_long$Parameter)
+for (param_name in unique_parameters) {
+  plot_data <- beta_samples_long %>%
+    filter(Parameter == param_name)
+  pl <- ggplot(plot_data, aes(x = Iteration, y = Value)) +
+    geom_line() +
+    labs(
+      title = param_name,
+      x = "Iteration",
+      y = "Sample Value"
+    ) +theme(axis.text.x = element_blank())
+  print(pl)
+}
+beta_samples_subset <- as.data.frame(beta_samples[, 1:p]) %>%
+  setNames(paste0("Beta ", 0:(p - 1)))
+acf_plots <- list()
+for (i in 1:p) {
+  param_name <- colnames(beta_samples_subset)[i]
+  samples <- beta_samples_subset[[i]]
+  acf_output <- acf(samples, plot = FALSE)
+  acf_data <- data.frame(
+    Lag = acf_output$lag,
+    ACF = acf_output$acf
+  )
+  N <- length(samples)
+  critical_value <- qnorm(0.975) / sqrt(N)
+  pl <- ggplot(acf_data, aes(x = Lag, y = ACF)) +
+    geom_segment(aes(xend = Lag, yend = 0), size = 0.3, color = "black") +
+    geom_hline(yintercept = c(critical_value, -critical_value), linetype = "dashed", color = "red") +
+    geom_hline(yintercept = 0) +
+    labs(
+      title = param_name,
+      x = "Lag",
+      y = "Autocorrelation"
+    ) +
+    scale_x_continuous(breaks = unique(acf_data$Lag)) + theme(axis.text.x = element_blank())
+  acf_plots[[param_name]] <- pl
+  print(pl)
+}
+```
+
+Before interpreting the plots, one needs to adjust the $\boldsymbol\beta$ samples by burning-in and thinning them. Upon taking a look at the traceplots, it looks like the chains take about the first 1,000 iterations to start converging, so the first thousand samples are discarded. Thinning may not be a good idea, since it will not make a difference, considering there is extremely high autocorrelation for the samples of all $\boldsymbol\beta_i$. Upon testing, the values of the coefficients do not change by a lot either. As for the diagnostics of this MCMC simulation, good mixing is only seen in a few coefficients, and not all.
+
+The posterior means, 95% credible intervals, and significance of the various features are in the table below. Significance is determined by whether zero is included within the significance interval. If zero is not included, this means that there is a clear direction of the effect of the given variable on the malignancy of the mass, and the variable is likely to be significant.
+
+```{r}
+burnin <- 1000
+thin <- 50
+sub <- seq(from = burnin + 1, to = 20000)
+beta_samples <- results$BETA[sub, ]
+beta_hat <- colMeans(beta_samples)
+beta_ci <- t(apply(beta_samples, 2, quantile, probs = c(0.025, 0.975)))
+results_df <- data.frame(
+  `Feature` = colnames(X),
+  `Posterior Mean` = beta_hat,
+  `Lower CI` = beta_ci[, 1],
+  `Upper CI` = beta_ci[, 2],
+  `Significance` = ifelse(beta_ci[, 1] * beta_ci[, 2] > 0, "Yes", "No")
+)
+print(results_df)
+```
+
+Model selection within the Bayesian framework is still required, however. Variables selected by "significance" as done in linear regression, do not show good mixing in the traceplots.
+
+## Variable Selection
+
+In the previous section, all 30 regression coefficients were estimated simultaneously. However, not all features may be equally important for predicting malignancy. Including irrelevant features can lead to overfitting and reduced interpretability. Bayesian variable selection provides a principled framework for identifying which features are most informative while accounting for uncertainty in the selection process itself.
+
+### Model Formulation
+
+Rather than estimating a single model, all possible subsets of features are considered. The data determines which features should be included. Binary indicator variables $\mathbf{z} = (z_1, \ldots, z_{p})$ are introduced where $z_j \in \{0, 1\}$ indicates whether feature $j$ is included in the model:
+
+$$\text{logit}(\theta_i) = b_0 + \sum_{j=1}^{30} z_j b_j x_{i,j}$$
+
+If $z_j = 1$, feature $j$ is included in the model, contributing $b_j x_{i,j}$ to the linear predictor. If $z_j = 0$, feature $j$ is excluded from the model, contributing nothing (effectively $\beta_j = 0$).
+
+The intercept $b_0$ is always included (no indicator variable). The joint parameter vector is now $\boldsymbol{\theta} = (\mathbf{z}, \mathbf{b})$, where $\mathbf{b} = (b_0, b_1, \ldots, b_{30})$ are the regression coefficients. Importantly, $\mathbf{b}$ represents the coefficients if the corresponding features were included--the actual effect is $j\beta_j = z_j \cdot b_j$.
+
+### Prior Specifications
+
+One must specify prior distributions for both the coefficients $\mathbf{b}$ and the indicators $\mathbf{z}$. For the coefficients, one must use the same weakly informative multivariate normal prior as before:
+
+$$\mathbf{b} \sim \mathcal{N}(\mathbf{0}, \sigma_b^2 \mathbf{I}_{31}), \quad \sigma_b^2 = 100$$
+For the indicators, equal prior probability is assigned to inclusion or exclusion:
+
+$$p(z_j = 1) = 0.5, \quad \text{independently for } j = 1, \ldots, 30$$
+
+This uniform prior on each $z_j$ implies equal prior probability across all $2^{30} \approx 1.07$ billion possible models. No *a priori* assumption is made about which features are important, allowing the data to guide the selection.
+
+### Metropolis-Hastings Algorithm
+
+Since there now are two types of parameters--discrete indicators $\mathbf{z}$ and continuous coefficients $\mathbf{b}$-—they can be updated separately within each MCMC iteration using a two-step Metropolis-Hastings procedure.
+
+First, $\mathbf{z}$ is updated given current $\mathbf{b}$. At iteration $k$, a new indicator vector $\mathbf{z}^*$ is proposed by randomly flipping each indicator with probability $p_\text{flip}=0.2$:
+
+$$z_j^* = \begin{cases}z_j^{(k)} & \text{with } p_\text{flip}=0.8 \text{ (no flip)} \\1 - z_j^{(k)} & \text{with } p_\text{flip}=0.2 \text{ (flip)}\end{cases}$$
+This proposal is symmetric: the probability of proposing $\mathbf{z}^*$ from $\mathbf{z}^{(k)}$ equals the probability of proposing $\mathbf{z}^{(k)}$ from $\mathbf{z}^*$. The acceptance ratio simplifies to:
+
+$$r_z = \frac{p(\mathbf{y} \mid \mathbf{X}, \mathbf{z}^*, \mathbf{b}^{(k)})}{p(\mathbf{y} \mid \mathbf{X}, \mathbf{z}^{(k)}, \mathbf{b}^{(k)})}$$
+
+Next, $\mathbf{b}$ is updated given current $\mathbf{z}$. After updating $\mathbf{z}$, the coefficients $\mathbf{z}$ are updated using the same symmetric normal proposal as in the full model:
+
+$$\mathbf{b}^* \sim N(\mathbf{b}^{(k)}, \boldsymbol{\Sigma}_{\text{prop}})$$
+where $\boldsymbol{\Sigma}_{\text{prop}} = 0.5 \cdot (\mathbf{X}^T\mathbf{X})^{-1}$. The acceptance ratio is:
+
+$$r_b = \frac{p(\mathbf{y} | \mathbf{X}, \mathbf{z}^{(k+1)}, \mathbf{b}^*) p(\mathbf{b}^*)}{p(\mathbf{y} | \mathbf{X}, \mathbf{z}^{(k+1)}, \mathbf{b}^{(k)}) p(\mathbf{b}^{(k)})}$$
+Note that this ratio is evaluated using the updated indicator vector $\mathbf{z}^{(k+1)}$ from the first step. This ensures that the coefficient updates are conditioned on the current model structure.
+
+### Computing the Effective Coefficient Vector
+
+For likelihood evaluation, the effective coefficient vector is computed:
+
+$$\boldsymbol{\beta}_{\text{effective}} = \begin{bmatrix} b_0 \\ z_1 b_1 \\ z_2 b_2 \\ \vdots \\ z_{30} b_{30} \end{bmatrix}$$
+When $z_j=0$, the corresponding coefficient is zeroed out, effectively excluding that feature from the model.
+
+```{r}
+mu0_b <- rep(0, p)
+sigma0_b <- 100 * diag(p)
+
+var_prop_b <- 0.5 * solve(t(X) %*% X)
+prob_flip <- 0.2
+
+S <- 20000
+z <- rep(1, 30)
+b <- rep(0, p)
+Z <- matrix(0, nrow = S, ncol = 30)
+B <- matrix(0, nrow = S, ncol = p)
+accept_z <- 0
+accept_b <- 0
+
+set.seed(465)
+
+for(s in 1:S) {
+  z_prop <- z + (1 - 2*z) * rbinom(30, size = 1, prob = prob_flip)
+  beta_current <- c(b[1], z * b[-1])
+  beta_prop <- c(b[1], z_prop * b[-1])
+  log_r_z <- sum(dbinom(y, size = 1, 
+                        prob = 1/(1 + exp(-X %*% beta_prop)), log = TRUE)) -
+             sum(dbinom(y, size = 1, 
+                        prob = 1/(1 + exp(-X %*% beta_current)), log = TRUE))
+  
+  if(log(runif(1)) <= log_r_z) {
+    z <- z_prop
+    accept_z <- accept_z + 1
+  }
+  b_prop <- as.vector(rmvnorm(1, b, var_prop_b))
+  beta_current <- c(b[1], z * b[-1])
+  beta_prop_b <- c(b_prop[1], z * b_prop[-1])
+  log_r_b <- sum(dbinom(y, size = 1, 
+                        prob = 1/(1 + exp(-X %*% beta_prop_b)), log = TRUE)) -
+             sum(dbinom(y, size = 1, 
+                        prob = 1/(1 + exp(-X %*% beta_current)), log = TRUE)) +
+             dmvnorm(b_prop, mu0_b, sigma0_b, log = TRUE) -
+             dmvnorm(b, mu0_b, sigma0_b, log = TRUE)
+  
+  if(log(runif(1)) <= log_r_b) {
+    b <- b_prop
+    accept_b <- accept_b + 1
+  }
+  Z[s, ] <- z
+  B[s, ] <- b
+}
+```
+After running the MCMC sampler, samples $\mathbf{z}^{(1)},\mathbf{z}^{(2)},\dots,\mathbf{z}^{(S)}$ are obtained of the indicator variables. The posterior inclusion probability for feature $j$ is simply the proportion of iterations where $z_j = 1$:
+
+$$P(z_j = 1 \mid \mathbf{y}, \mathbf{X}) \approx \frac{1}{S - S_{\text{burnin}}} \sum_{s=S_{\text{burnin}}+1}^{S} z_j^{(s)}$$
+
+This probability quantifies the posterior belief that feature $j$ should be included in the model. Features with high inclusion probabilities (e.g., $> 0.5$) are strongly supported by the data, while features with low probabilities can be considered unimportant. All features and their inclusion probabilities are displayed below:
+
+```{r}
+Z_samples <- Z[(burnin+1):S, ]
+B_samples <- B[(burnin+1):S, ]
+
+inclusion_prob <- colMeans(Z_samples)
+
+var_selection_results <- data.frame(
+  Feature = colnames(X)[-1],
+  Inclusion_Probability = inclusion_prob
+)
+
+var_selection_results <- var_selection_results[order(-inclusion_prob), ]
+print(var_selection_results)
+important_features <- var_selection_results$Feature[inclusion_prob > 0.5]
+```
+
+The important features are as follows:
+```{r}
+print(important_features)
+```
+
+### Posterior Estimates for the Selected Model
+
+To obtain coefficient estimates that account for variable selection uncertainty, the effective coefficients for each MCMC sample are computed by multiplying the coefficient values by their corresponding indicators:
+
+$$\beta_j^{(s)} = z_j^{(s)} \cdot b_j^{(s)}$$
+The posterior mean and credible intervals for these effective coefficients incorporate both parameter uncertainty (variation in $b_j$) and model uncertainty (whether $z_j = 0$ or $1$).
+
+```{r}
+BETA_effective <- B_samples
+BETA_effective[, -1] <- BETA_effective[, -1] * Z_samples
+
+beta_selected <- colMeans(BETA_effective)
+
+beta_selected_ci <- t(apply(BETA_effective, 2, quantile, probs = c(0.025, 0.975)))
+
+results_df <- data.frame(
+  Feature = colnames(X),
+  Inclusion_Prob = c(1, inclusion_prob),
+  Post_Mean = beta_selected,
+  CI_Lower = beta_selected_ci[, 1],
+  CI_Upper = beta_selected_ci[, 2]
+)
+print(results_df)
+```
+
+The traceplots for the coefficients are as follows:
+
+```{r}
+if(is.null(colnames(BETA_effective))) {
+  colnames(BETA_effective) <- colnames(X)
+}
+beta_selected_long <- BETA_effective %>%
+  as.data.frame() %>%
+  mutate(Iteration = row_number()) %>%
+  pivot_longer(
+    cols = -Iteration,
+    names_to = "Parameter",
+    values_to = "Value"
+  )
+unique_parameters <- unique(beta_selected_long$Parameter)
+for (param_name in unique_parameters) {
+  plot_data <- beta_selected_long %>%
+    filter(Parameter == param_name)
+  pl <- ggplot(plot_data, aes(x = Iteration, y = Value)) +
+    geom_line(color = "black") +
+    labs(
+      title = param_name,
+      x = "Iteration",
+      y = "Sample Value"
+    ) +
+    theme(axis.text.x = element_blank())
+  print(pl)
+}
+```
+
+Variables with posterior inclusion probability set to zero, like `fractal_dimension1`, have no exploration in their traceplot at all.
+
+The effective posterior means will be exactly zero for features with $z_j = 0$ in all samples, and will be shrunken toward zero for features that are only sometimes included. This provides automatic regularization while maintaining interpretability.
+
+Unlike classical methods that select a single "best" model, Bayesian variable selection explores the entire model space and assigns posterior probabilities to each model. The specific combinations of features the MCMC sampler visited most frequently can be identified.
+
+## Results and Conclusion
+
+The ultimate goal of this analysis is not merely to build a Bayesian model, but to understand which cellular characteristics are most indicative of malignancy. This understanding can inform clinical decision-making and suggest biological mechanisms underlying breast cancer.
+
+### Coefficient Interpretation
+
+For features with high posterior inclusion probabilities, one interprets the coefficients on the odds scale. Recall that in logistic regression, $\exp(\beta_j)$ represents the multiplicative change in odds of malignancy associated with a one-unit increase in feature $j$.
+
+Since features were standardized, a "one-unit increase" corresponds to a *one standard deviation increase* in the original measurement. This makes coefficients directly comparable across features measured on different scales.
+
+All important features are defined as features with posterior inclusion probability greater than 50%, or features that were included in more than half of the possible combinations.
+
+```{r}
+important_idx <- which(inclusion_prob > 0.5)
+important_features <- colnames(X)[-1][important_idx]
+for(i in important_idx) {
+  feature_name <- colnames(X)[i + 1]
+  coef_value <- beta_selected[i + 1]
+  odds_ratio <- exp(coef_value)
+  ci_lower <- exp(beta_selected_ci[i + 1, 1])
+  ci_upper <- exp(beta_selected_ci[i + 1, 2])
+  
+  cat("\n", feature_name, ":\n", sep = "")
+  cat("  Coefficient: ", round(coef_value, 4), "\n", sep = "")
+  cat("  Odds ratio: ", round(odds_ratio, 4), "\n", sep = "")
+  cat("  95% CI for OR: (", round(ci_lower, 4), ", ", round(ci_upper, 4), ")\n", sep = "")
+  cat("  A 1-SD increase in ", feature_name, "\nmultiplies the odds of \nmalignancy by ", 
+        round(odds_ratio, 2), "\n", sep = "")
+}
+```
+
+> Example Interpretation: Consider `symmetry3`. If there a one standard deviation increase in the worst symmetry measurement, the odds of malignancy multiplies by approximately $e^{0.8067}\approx2.24$, holding all other features constant.
+
+### Ranking the Most Important Features by Inclusion Probability
+
+While it is known what the important features are, which of these are the most important?
+
+The following features, as per the above computations, have a posterior inclusion probability of 1--they are included in every single model combination.
+
+- The mean measurement of texture
+- The mean measurement of smoothness
+- The mean measurement of	compactness
+- The standard error of concavity		
+- The worst measurement of radius
+= The worst measurement of concavity
+
+# References
